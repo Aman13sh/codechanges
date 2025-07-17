@@ -1,0 +1,282 @@
+// TrackTimeModal.tsx
+import React, { useEffect, useRef, useState } from "react";
+import {
+  Calendar,
+  Clock,
+  Play,
+  StopCircle,
+  Tag,
+  AlignLeft,
+  Save,
+} from "lucide-react";
+import Toast from "./Toast";
+import TaskTimeRollup from "../../Components/Time/TimeTrack/TaskTimeRollup";
+import TimeEntryAccordion from "../../Components/Time/TimeTrack/TimeEntryAccordion";
+import { formatTime } from "../../Utils/TimerUtil";
+import TimeRangePicker from "../../Components/DropDown/TimeRangePicker";
+import ReactCalendar from "react-calendar";
+import "react-calendar/dist/Calendar.css";
+import { useGlobalStopwatch } from "../../Redux/hooks/useGlobalStopwatch";
+import { saveTimeTrackingDetails } from "../../Services/API/Post"; 
+import { overTimeUpdate } from "../../Services/API/Post";
+
+
+
+interface Props {
+  isOpen: boolean;
+  taskId:string,
+  progress:number | undefined;
+  overTime:string;
+  estimateTime:string|null;
+  onClose: () => void;
+  anchorRef: React.RefObject<HTMLElement | null>;
+}
+
+const TrackTimeModal: React.FC<Props> = ({ isOpen,taskId, onClose, anchorRef ,overTime ,estimateTime,progress}) => {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedFutureDate, setSelectedFutureDate] = useState<Date | null>(
+    null
+  );
+  const [message,setMessage]=useState("")
+  const [notes, setNotes] = useState("");
+  const [tags, setTags] = useState("");
+  const [timeRange, setTimeRange] = useState({ start: "12:00 am", end: "11:45 pm" });
+  const [rangeDiff, setRangeDiff] = useState<{ hours: number; minutes: number; seconds: number } | null>(null);
+
+
+  const { seconds, minutes, hours , isRunning, handleStart, handleStop } = useGlobalStopwatch();
+
+  useEffect(() => {
+    if (isOpen && anchorRef.current) {
+      const rect = anchorRef.current.getBoundingClientRect();
+      setPosition({
+        top: rect.bottom + window.scrollY + 8,
+        left: rect.left + window.scrollX,
+      });
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  async function handleOverTimeSave(){
+
+    const formData={
+          taskId:taskId,
+          userId:"1234",
+          timeSpent:seconds+minutes*60+hours*3600
+    
+        }
+        const response = await overTimeUpdate(formData)
+        if(response.success){
+          setMessage(response.message)
+          handleStop()
+        }
+       
+  }
+
+  const handleSave = async() => {
+      const userId=""
+      const formData = {
+      taskId,
+      userId,
+      selectedFutureDate,
+      notes,
+      tags,
+      timeRange
+      
+    }
+      const response = await saveTimeTrackingDetails(formData)
+      if(response.success){
+        setNotes("")
+        setTimeRange({ start: "12:00 am", end: "11:45 pm" })
+        setTags("")
+          setMessage(response.message)
+      }
+      else{
+        setMessage("Something went wrong")
+      }
+  }
+
+  function genreateOvertime(ov:string){
+    const over = Number(ov)
+    if(over > 60){
+      return over/60 + "h"
+    }
+    else{
+      return Math.floor(over) + "m"
+    }
+
+  }
+
+  // Helper to parse time string (e.g., "12:00 am") to Date object (today)
+  function parseTimeString(timeStr: string): Date {
+    const [time, modifier] = timeStr.split(' ');
+    let [hours, minutes] = time.split(':').map(Number);
+    if (modifier.toLowerCase() === 'pm' && hours !== 12) hours += 12;
+    if (modifier.toLowerCase() === 'am' && hours === 12) hours = 0;
+    const now = new Date();
+    now.setHours(hours, minutes, 0, 0);
+    return now;
+  }
+
+  // Calculate time difference in h/m/s
+  function getTimeDiff(start: string, end: string) {
+    const startDate = parseTimeString(start);
+    const endDate = parseTimeString(end);
+    let diff = (endDate.getTime() - startDate.getTime()) / 1000;
+    if (diff < 0) diff += 24 * 3600; // handle overnight
+    const hours = Math.floor(diff / 3600);
+    const minutes = Math.floor((diff % 3600) / 60);
+    const seconds = Math.floor(diff % 60);
+    return { hours, minutes, seconds };
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <Toast message={message} closeToast={() => setMessage("")} />
+      {/* Modal */}
+      <div
+        ref={modalRef}
+        className="fixed z-50 w-[400px] bg-white rounded-md shadow-lg border border-gray-200 p-4 space-y-4"
+        style={{ top: `${position.top}px`, left: `${position.left}px` }}
+      >
+        <TaskTimeRollup
+          totalTime={genreateOvertime(overTime)}
+          estimatedTime={String(estimateTime)}
+          withoutSubtasksTime="0h"
+          withoutSubtasksEstimate="11322h"
+          progress={Number(progress)}
+          
+        />
+
+        <div className="flex items-center gap-2">
+          <Clock size={16} />
+
+          <div className="flex items-center gap-2 px-2 py-1 text-sm border border-gray-300 rounded bg-gray-50 flex-1 justify-between">
+            <span>
+              {rangeDiff
+                ? `${formatTime(rangeDiff.hours)}:${formatTime(rangeDiff.minutes)}:${formatTime(rangeDiff.seconds)}`
+                : `${formatTime(hours)}:${formatTime(minutes)}:${formatTime(seconds)}`}
+            </span>
+
+            {!isRunning && (
+              <button
+                onClick={()=>{handleStart(taskId,"1234")}}
+                className="p-1.5 rounded bg-white hover:bg-gray-100"
+              >
+                <Play size={16} className="text-black-600" />
+              </button>
+            )}
+
+            {isRunning && (
+              <button
+                onClick={() => {
+                  handleOverTimeSave();
+                  const finalTime = `${formatTime(hours)}:${formatTime(minutes)}:${formatTime(seconds)}`;
+                  console.log("⏱️ Stopwatch Stopped at:", finalTime);
+                }}
+                className="p-1.5 rounded bg-red-100 hover:bg-red-200"
+              >
+                <StopCircle size={16} className="text-red-600"/>
+              </button>
+            )}
+
+          </div>
+        </div>
+
+        {/* Date + Time Range Picker */}
+        <div className="flex items-center gap-2 text-sm w-full">
+          <Calendar size={16} className="text-gray-500 shrink-0" />
+          <div className="relative w-full">
+            <button
+              onClick={() => setShowDatePicker(true)}
+              className="flex items-center gap-2 border border-gray-300 rounded px-2 py-1.5 text-xs w-full text-left"
+            >
+              <span>
+                {selectedFutureDate
+                  ? selectedFutureDate.toLocaleDateString("en-US", {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                  })
+                  : "Select date"}
+              </span>
+            </button>
+
+            {showDatePicker && (
+              <div className="absolute z-50 mt-2 bg-white border rounded shadow w-[300px]">
+                <div className="p-2">
+                  <ReactCalendar
+                    className="w-full text-sm"
+                    onChange={(value) => {
+                      if (value instanceof Date) {
+                        setSelectedFutureDate(value);
+                        setShowDatePicker(false); // ✅ Immediately close after selecting
+                      }
+                    }}
+                    value={selectedFutureDate}
+                    minDate={new Date(Date.now() + 86400000 * 2)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Time Range Picker */}
+          <TimeRangePicker
+            onChange={(range) => {
+              setTimeRange(range);
+              const diff = getTimeDiff(range.start, range.end);
+              setRangeDiff(diff);
+              console.log("Selected Time Range:", range, "Diff:", diff);
+            }}
+          />
+
+
+        </div>
+
+        {/* Notes */}
+        <div className="flex items-start gap-2 text-sm">
+          <AlignLeft size={16} />
+          <input
+            placeholder="Notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="w-full border border-gray-300 px-2 py-1 rounded resize-none focus:outline-none focus:border-black focus:ring-0"
+          />
+        </div>
+
+        {/* Tags */}
+        <div className="flex items-center gap-2 text-sm">
+          <Tag size={16} />
+          <input
+            type="text"
+            placeholder="Add tags"
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            className="flex-1 border border-gray-300 px-2 py-1 rounded focus:outline-none focus:border-black focus:ring-0"
+          />
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between">
+          <div />
+          <button
+            className="flex items-center gap-2 px-3 py-1.5 rounded text-sm text-white bg-black hover:bg-neutral-800"
+            onClick={handleSave}
+          >
+            <Save size={16} /> Save
+          </button>
+        </div>
+
+        <TimeEntryAccordion />
+      </div>
+    </>
+  );
+};
+
+export default TrackTimeModal;
